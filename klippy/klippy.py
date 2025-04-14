@@ -381,6 +381,9 @@ def main():
         opts.error("Incorrect number of arguments")
     start_args = {'config_file': args[0], 'apiserver': options.apiserver,
                   'start_reason': 'startup'}
+    
+    # Create Creality data directory
+    os.makedirs("/home/printer/printer_data/creality/userdata/config", exist_ok=True)
 
     debuglevel = logging.INFO
     if options.verbose:
