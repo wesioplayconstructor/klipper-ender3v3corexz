@@ -101,30 +101,30 @@ def get_print_file_metadata(file_path):
         with open(file_path, "r") as f:
             while count:
                 count -= 1
-                line = f.readline() 
+                line = f.readline()
                 if not line.startswith(";"):
                     continue
-                if re.findall(r";MINX:(.*)\n", line):  
+                if re.findall(r";MINX:(.*)\n", line):
                     result["MINX"] = float(re.findall(r";MINX:(.*)\n", line)[0].strip())
-                if re.findall(r";MINY:(.*)\n", line):  
-                    result["MINY"] = float(re.findall(r";MINY:(.*)\n", line)[0].strip()) 
-                if re.findall(r";MINZ:(.*)\n", line):  
+                if re.findall(r";MINY:(.*)\n", line):
+                    result["MINY"] = float(re.findall(r";MINY:(.*)\n", line)[0].strip())
+                if re.findall(r";MINZ:(.*)\n", line):
                     result["MINZ"] = float(re.findall(r";MINZ:(.*)\n", line)[0].strip())
-                if re.findall(r";MAXX:(.*)\n", line):  
-                    result["MAXX"] = float(re.findall(r";MAXX:(.*)\n", line)[0].strip()) 
-                if re.findall(r";MAXY:(.*)\n", line):  
+                if re.findall(r";MAXX:(.*)\n", line):
+                    result["MAXX"] = float(re.findall(r";MAXX:(.*)\n", line)[0].strip())
+                if re.findall(r";MAXY:(.*)\n", line):
                     result["MAXY"] = float(re.findall(r";MAXY:(.*)\n", line)[0].strip())
-                if re.findall(r";MAXZ:(.*)\n", line):  
+                if re.findall(r";MAXZ:(.*)\n", line):
                     result["MAXZ"] = float(re.findall(r";MAXZ:(.*)\n", line)[0].strip())
-                if re.findall(r";Machine Height:(.*)\n", line):  
+                if re.findall(r";Machine Height:(.*)\n", line):
                     result["MachineHeight"] = float(re.findall(r";Machine Height:(.*)\n", line)[0].strip())
-                if re.findall(r";Machine Width:(.*)\n", line):  
+                if re.findall(r";Machine Width:(.*)\n", line):
                     result["MachineWidth"] = float(re.findall(r";Machine Width:(.*)\n", line)[0].strip())
-                if re.findall(r";Machine Depth:(.*)\n", line):  
+                if re.findall(r";Machine Depth:(.*)\n", line):
                     result["MachineDepth"] = float(re.findall(r";Machine Depth:(.*)\n", line)[0].strip())
-                if re.findall(r";Material Name:(.*)\n", line):  
+                if re.findall(r";Material Name:(.*)\n", line):
                     result["MaterialName"] = str(re.findall(r";Material Name:(.*)\n", line)[0].strip())
-                if re.findall(r";Material Type:(.*)\n", line):  
+                if re.findall(r";Material Type:(.*)\n", line):
                     result["MaterialType"] = str(re.findall(r";Material Type:(.*)\n", line)[0].strip())
     except Exception as err:
         print(err)
@@ -262,6 +262,9 @@ class BaseSlicer(object):
     def parse_nozzle_diameter(self) -> Optional[float]:
         return None
 
+    def parse_flush_para(self) -> Optional[Dict[str, Any]]:
+        return None
+
 class UnknownSlicer(BaseSlicer):
     def check_identity(self, data: str) -> Optional[Dict[str, str]]:
         return {'slicer': "Unknown"}
@@ -397,6 +400,39 @@ class PrusaSlicer(BaseSlicer):
     def parse_layer_count(self) -> Optional[int]:
         return _regex_find_int(
             r"; total layers count = (\d+)", self.footer_data)
+
+    def parse_flush_para(self) -> Optional[Dict[str, List[int]]]:
+        flush_multiplier = None
+        flush_volumes_matrix = None
+        purge_in_prime_tower = None
+        # Search for flush_multiplier value
+        flush_multiplier_match = re.search(r'flush_multiplier\s*=\s*([\d.]+)', self.footer_data)
+        if not flush_multiplier_match:
+            flush_multiplier_match = re.search(r'flush_multiplier\s*=\s*([\d.]+)', self.header_data)
+        if flush_multiplier_match:
+            flush_multiplier = float(flush_multiplier_match.group(1))
+        # Search for flush_volumes_matrix value
+        flush_volumes_matrix_match = re.search(r'flush_volumes_matrix\s*=\s*([^;]+)', self.footer_data)
+        if not flush_volumes_matrix_match:
+            flush_volumes_matrix_match = re.search(r'flush_volumes_matrix\s*=\s*([^;]+)', self.header_data)
+        if flush_volumes_matrix_match:
+            flush_volumes_matrix = [int(x) for x in flush_volumes_matrix_match.group(1).strip().split(',')]
+
+        if flush_volumes_matrix and len(flush_volumes_matrix) > 1 and  not any(flush_volumes_matrix):
+            flush_volumes_matrix = None
+
+        # Search for purge_in_prime_tower value
+        purge_in_prime_tower_match = re.search(r'purge_in_prime_tower\s*=\s*(\d)', self.footer_data)
+        if not purge_in_prime_tower_match:
+            purge_in_prime_tower_match = re.search(r'purge_in_prime_tower\s*=\s*(\d)', self.header_data)
+        if purge_in_prime_tower_match:
+            purge_in_prime_tower = int(purge_in_prime_tower_match.group(1))
+
+        # return
+        if flush_multiplier is not None or flush_volumes_matrix is not None or purge_in_prime_tower is not None:
+            return {'flush_multiplier': flush_multiplier, 'flush_volumes_matrix': flush_volumes_matrix, 'purge_in_prime_tower': purge_in_prime_tower}
+        else:
+            return None
 
 class Slic3rPE(PrusaSlicer):
     def check_identity(self, data: str) -> Optional[Dict[str, str]]:
@@ -907,10 +943,11 @@ class Creality(BaseSlicer):
         }
         pattern = r'Version : V([\d\.]+)'
         match_version = re.search(pattern, data)
+        if not match_version:
+            match_version = re.search(r'Creality_Print V([\d\.]+)', data)
         slicer_version = match_version.group(1) if match_version else "1.0"
         for name, expr in aliases.items():
             match = re.search(expr, data)
-            # ;Creality Print Version : V4.3.7.6456
             if match:
                 return {
                     'slicer': name,
@@ -919,21 +956,24 @@ class Creality(BaseSlicer):
         return None
 
     def parse_first_layer_height(self) -> Optional[float]:
-        return _regex_find_first(
-            r";MINZ:(\d+\.?\d*)", self.footer_data)
+        first_layer_height = _regex_find_first(r";MINZ:(\d+\.?\d*)", self.header_data)
+        if not first_layer_height:
+            first_layer_height = _regex_find_first(r";MINZ:(\d+\.?\d*)", self.footer_data)
+        return first_layer_height
 
     def parse_model_info(self):
         return get_print_file_metadata(self.path)
 
     def parse_layer_height(self) -> Optional[float]:
-        pattern = r";Layer\sheight:\s(\d+\.?\d*)"
-        self.layer_height = _regex_find_first(
-            pattern, self.footer_data)
+        pattern = r";Layer height:\s*(\d+\.?\d*)"
+        self.layer_height = _regex_find_first(pattern, self.header_data)
+        if not self.layer_height:
+            self.layer_height = _regex_find_first(r"; layer_height = (\d+\.\d*)", self.footer_data)
         return self.layer_height
 
     def parse_object_height(self) -> Optional[float]:
         matches = re.findall(
-            r";MAXZ:(\d+\.?\d*)", self.footer_data)
+            r";MAXZ:(\d+\.?\d*)", self.header_data)
         if matches:
             try:
                 matches = [float(m) for m in matches]
@@ -941,11 +981,17 @@ class Creality(BaseSlicer):
                 pass
             else:
                 return max(matches)
+        else:
+            max_z_height = _regex_find_first(r"; max_z_height: (\d+\.\d*)", self.header_data)
+            if max_z_height:
+                return max_z_height
         return self._parse_max_float(r"G1\sZ\d+\.\d*\sF", self.footer_data)
 
     def parse_layer_count(self) -> Optional[int]:
-        return _regex_find_int(
-            r";LAYER_COUNT\:(\d+)", self.header_data)
+        layer_count = _regex_find_int(r";LAYER_COUNT\:(\d+)", self.header_data)
+        if not layer_count:
+            layer_count = _regex_find_int(r"; total layer number: (\d+)", self.header_data)
+        return layer_count
 
     def parse_filament_type(self) -> Optional[str]:
         return _regex_find_string(
@@ -957,31 +1003,63 @@ class Creality(BaseSlicer):
 
     def parse_filament_total(self) -> Optional[float]:
         filament_total = _regex_find_first(
-            r";Filament used:(\d+\.?\d*)m", self.footer_data)
-        filament_total = filament_total * 1000
+            r";Filament used:(\d+\.?\d*)m", self.header_data)
+        if filament_total:
+            filament_total = filament_total * 1000
         return filament_total
 
     def parse_filament_weight_total(self) -> Optional[float]:
-        filament_total = _regex_find_first(
-            r";Filament Weight:(\d+\.?\d*)", self.footer_data)
-        filament_weight_total = filament_total
+        filament_weight_total = _regex_find_first(
+            r";Filament Weight:(\d+\.?\d*)", self.header_data)
+        if filament_weight_total:
+            filament_weight_total = filament_weight_total * 5.88
         return filament_weight_total
 
     def parse_estimated_time(self) -> Optional[float]:
         total_time = _regex_find_first(
-            r";TIME:(\d+)", self.footer_data)
+            r";TIME:(\d+)", self.header_data)
         return total_time
 
     def parse_first_layer_extr_temp(self) -> Optional[float]:
-        # return _regex_find_first(
-        #     r"; first_layer_temperature = (\d+\.?\d*)", self.footer_data)
         return _regex_find_first(
-            r";Print Temperature:(\d+\.?\d*)", self.footer_data)
+            r";Print Temperature:(\d+\.?\d*)", self.header_data)
 
     def parse_first_layer_bed_temp(self) -> Optional[float]:
         return _regex_find_first(
-            r";Bed Temperature:(\d+\.?\d*)", self.footer_data)
+            r";Bed Temperature:(\d+\.?\d*)", self.header_data)
 
+    def parse_flush_para(self) -> Optional[Dict[str, List[int]]]:
+        flush_multiplier = None
+        flush_volumes_matrix = None
+        purge_in_prime_tower = None
+        # Search for flush_multiplier value
+        flush_multiplier_match = re.search(r'flush_multiplier\s*=\s*([\d.]+)', self.footer_data)
+        if not flush_multiplier_match:
+            flush_multiplier_match = re.search(r'flush_multiplier\s*=\s*([\d.]+)', self.header_data)
+        if flush_multiplier_match:
+            flush_multiplier = float(flush_multiplier_match.group(1))
+        # Search for flush_volumes_matrix value
+        flush_volumes_matrix_match = re.search(r'flush_volumes_matrix\s*=\s*([^;]+)', self.footer_data)
+        if not flush_volumes_matrix_match:
+            flush_volumes_matrix_match = re.search(r'flush_volumes_matrix\s*=\s*([^;]+)', self.header_data)
+        if flush_volumes_matrix_match:
+            flush_volumes_matrix = [int(x) for x in flush_volumes_matrix_match.group(1).strip().split(',')]
+        if flush_volumes_matrix and len(flush_volumes_matrix) > 1 and  not any(flush_volumes_matrix):
+            flush_volumes_matrix = None
+
+        # Search for purge_in_prime_tower value
+        purge_in_prime_tower_match = re.search(r'purge_in_prime_tower\s*=\s*(\d)', self.footer_data)
+        if not purge_in_prime_tower_match:
+            purge_in_prime_tower_match = re.search(r'purge_in_prime_tower\s*=\s*(\d)', self.header_data)
+        if purge_in_prime_tower_match:
+            purge_in_prime_tower = int(purge_in_prime_tower_match.group(1))
+
+
+        # return
+        if flush_multiplier is not None or flush_volumes_matrix is not None or purge_in_prime_tower is not None:
+            return {'flush_multiplier': flush_multiplier, 'flush_volumes_matrix': flush_volumes_matrix, 'purge_in_prime_tower': purge_in_prime_tower}
+        else:
+            return None
 
 READ_SIZE = 512 * 1024
 SUPPORTED_SLICERS: List[Type[BaseSlicer]] = [
@@ -1004,6 +1082,7 @@ SUPPORTED_DATA = [
     'filament_type',
     'filament_total',
     'filament_weight_total',
+    'flush_para',
     'model_info']
 
 def process_objects(file_path: str, slicer: BaseSlicer, name: str) -> bool:
@@ -1068,14 +1147,13 @@ def get_slicer(file_path: str) -> Tuple[BaseSlicer, Dict[str, str]]:
             slicer = UnknownSlicer(file_path)
             ident = slicer.check_identity(header_data)
         if size > READ_SIZE * 2:
-            if type(slicer) == Creality:
-                footer_data = header_data
-            else:
-                f.seek(size - READ_SIZE)
-                footer_data = f.read()
+            f.seek(size - READ_SIZE)
+            footer_data = f.read()
         elif size > READ_SIZE:
             if type(slicer) == Creality:
-                footer_data = header_data
+                # footer_data = header_data
+                f.seek(size - READ_SIZE)
+                footer_data = f.read()
             else:
                 remaining = size - READ_SIZE
                 footer_data = header_data[remaining - READ_SIZE:] + f.read()

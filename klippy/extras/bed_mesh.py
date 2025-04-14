@@ -241,6 +241,16 @@ class BedMesh:
             while not self.splitter.traverse_complete:
                 split_move = self.splitter.split()
                 if split_move:
+                    reactor = self.printer.get_reactor()
+                    z_homed = 'z' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
+                    x_homed = 'x' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
+                    y_homed = 'y' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
+                    # x or y homed, but z not homed
+                    if (x_homed or y_homed) and not z_homed:
+                        #logging.warning(f'bed_mesh: Z axis is not homed, skipping move z: {split_move}')
+                        list_split_move = list(split_move)
+                        list_split_move[2] = 0
+                        split_move = tuple(list_split_move)
                     self.toolhead.move(split_move, speed)
                 else:
                     raise self.gcode.error(

@@ -17,7 +17,8 @@ class Move:
         self.start_pos = tuple(start_pos)
         self.end_pos = tuple(end_pos)
         self.accel = toolhead.max_accel
-        self.junction_deviation = toolhead.junction_deviation
+        # self.junction_deviation = toolhead.junction_deviation
+        self.equilateral_corner_v2 = toolhead.equilateral_corner_v2
         self.timing_callbacks = []
         velocity = min(speed, toolhead.max_velocity)
         self.is_kinematic_move = True
@@ -105,8 +106,10 @@ class Move:
                                     * prev_move.accel)
         # Apply limits
         self.max_start_v2 = min(
-            R_jd * self.junction_deviation * self.accel,
-            R_jd * prev_move.junction_deviation * prev_move.accel,
+            # R_jd * self.junction_deviation * self.accel,
+            # R_jd * prev_move.junction_deviation * prev_move.accel,
+            R_jd * self.equilateral_corner_v2,
+            R_jd * prev_move.equilateral_corner_v2,
             move_centripetal_v2, prev_move_centripetal_v2,
             extruder_v2, self.max_cruise_v2, prev_move.max_cruise_v2,
             prev_move.max_start_v2 + prev_move.delta_v2)
@@ -245,7 +248,8 @@ class ToolHead:
             'square_corner_velocity', 5., minval=0.)
         self.square_corner_max_velocity = config.getfloat(
             'square_corner_max_velocity', 200., minval=0.)
-        self.junction_deviation = 0.
+        # self.junction_deviation = 0.
+        self.equilateral_corner_v2 = 0.
         self._calc_junction_deviation()
         # Print time tracking
         self.buffer_time_low = config.getfloat(
@@ -415,6 +419,7 @@ class ToolHead:
             if not self.can_pause:
                 self.need_check_stall = self.reactor.NEVER
                 return
+            self.printer.lookup_object("gcode").check_long_running()
             eventtime = self.reactor.pause(eventtime + min(1., stall_time))
         if not self.special_queuing_state:
             # In main state - defer stall checking until needed
@@ -451,7 +456,7 @@ class ToolHead:
         kin_status = self.kin.get_status(curtime)
         if ('z' in kin_status['homed_axes']):
             try:
-                if abs(commanded_pos_z-self.z_pos) > 5:
+                if abs(commanded_pos_z-self.z_pos) >= 2:
                     self.z_pos = commanded_pos_z
                     with open(self.z_pos_filepath, "w") as f:
                         f.write(json.dumps({"z_pos": commanded_pos_z}))
@@ -492,6 +497,7 @@ class ToolHead:
                or self.print_time >= self.mcu.estimated_print_time(eventtime)):
             if not self.can_pause:
                 break
+            self.printer.lookup_object("gcode").check_long_running()
             eventtime = self.reactor.pause(eventtime + 0.100)
     def set_extruder(self, extruder, extrude_pos):
         self.extruder = extruder
@@ -514,6 +520,7 @@ class ToolHead:
             npt = min(self.print_time + DRIP_SEGMENT_TIME, next_print_time)
             self._update_move_time(npt)
     def drip_move(self, newpos, speed, drip_completion):
+        self.printer.lookup_object("gcode").check_long_running()
         self.dwell(self.kin_flush_delay)
         # Transition from "Flushed"/"Priming"/main state to "Drip" state
         self.move_queue.flush()
@@ -595,7 +602,8 @@ class ToolHead:
         return self.max_velocity, self.max_accel
     def _calc_junction_deviation(self):
         scv2 = self.square_corner_velocity**2
-        self.junction_deviation = scv2 * (math.sqrt(2.) - 1.) / self.max_accel
+        # self.junction_deviation = scv2 * (math.sqrt(2.) - 1.) / self.max_accel
+        self.equilateral_corner_v2 = scv2 * (math.sqrt(2.) - 1.)
         self.max_accel_to_decel = min(self.requested_accel_to_decel,
                                       self.max_accel)
     def cmd_G4(self, gcmd):
@@ -675,7 +683,7 @@ class ToolHead:
             p = gcmd.get_float('P', None, above=0.)
             t = gcmd.get_float('T', None, above=0.)
             if p is None or t is None:
-                gcmd.respond_info("""{"code":"key73", "msg": "Invalid M204 command "%s"", "values": ["%s"]}"""
+                gcmd._respond_error("""{"code":"key73", "msg": "Invalid M204 command "%s"", "values": ["%s"]}"""
                                   % (gcmd.get_commandline(),gcmd.get_commandline()))
                 return
             accel = min(p, t)
