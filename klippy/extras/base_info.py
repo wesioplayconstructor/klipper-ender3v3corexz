@@ -6,7 +6,7 @@ class BaseDirSystemInfo:
     def __new__(cls):
         if not cls._instance:
             cls._instance = super(BaseDirSystemInfo, cls).__new__(cls)
-            cls._instance._base_dir = "/usr/data"
+            cls._instance._base_dir = "/home/printer/printer_data"
             cls._instance._h264_encoder_flag = "H264_ENCODER"
             cls._instance._initialize_base_dir()
         return cls._instance

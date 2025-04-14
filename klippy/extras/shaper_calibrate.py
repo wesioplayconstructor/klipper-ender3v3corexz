@@ -86,7 +86,7 @@ class ShaperCalibrate:
         self.error = printer.command_error if printer else Exception
         self.autotune_shapers = ['zv', 'mzv', 'ei', '2hump_ei', '3hump_ei']
         configfile = self.printer.lookup_object('configfile')
-        gcode_macro_path = '/usr/data/printer_data/config/gcode_macro.cfg'
+        gcode_macro_path = '/home/printer/printer_data/config/gcode_macro.cfg'
         gconfig = None
         try:
             gconfig = configfile.read_config(gcode_macro_path)

@@ -597,11 +597,11 @@ class VirtualSD:
     def get_print_file_metadata(self, filename, filepath=""):
         from subprocess import check_output
         if not filepath:
-            filepath = os.path.join(base_dir, "printer_data/gcodes")
+            filepath = os.path.join(base_dir, "gcodes")
         result = {}
-        python_env = "/usr/share/klippy-env/bin/python3"
+        python_env = "/home/printer/klippy-env/bin/python3"
         # -f gcode filename  -p gcode file dir
-        cmd = "%s /usr/share/klipper/klippy/extras/metadata.py -f '%s' -p %s" % (python_env, filename, filepath)
+        cmd = "%s /home/printer/klipper/klippy/extras/metadata.py -f '%s' -p %s" % (python_env, filename, filepath)
         try:
             result = json.loads(check_output(cmd, shell=True).decode("utf-8"))
         except Exception as err:

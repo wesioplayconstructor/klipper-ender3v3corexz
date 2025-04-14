@@ -306,7 +306,7 @@ class ToolHead:
                    "manual_probe", "tuning_tower"]
         for module_name in modules:
             self.printer.load_object(config, module_name)
-        self.z_pos_filepath = "/usr/data/creality/userdata/config/z_pos.json"
+        self.z_pos_filepath = "/home/printer/printer_data/creality/userdata/config/z_pos.json"
         self.z_pos = self.get_z_pos()
     def get_z_pos(self):
         z_pos = 0
