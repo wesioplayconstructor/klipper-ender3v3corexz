@@ -122,7 +122,7 @@ class VibrationPulseTest:
 
         self.probe_points = config.getlists('probe_points', seps=(',', '\n'),
                                             parser=float, count=3)
-        self.low_mem = config.getboolean('low_mem', True)
+        self.low_mem = config.getboolean('low_mem', False)
 
     def get_start_test_points(self):
         return self.probe_points
