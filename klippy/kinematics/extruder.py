@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2022  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import math, logging, os
+import math, logging
 import stepper, chelper
 
 class ExtruderStepper:
@@ -101,13 +101,6 @@ class ExtruderStepper:
                % (pressure_advance, smooth_time))
         self.printer.set_rollover_info(self.name, "%s: %s" % (self.name, msg))
         gcmd.respond_info(msg, log=False)
-        try:
-            v_sd = self.printer.lookup_object('virtual_sdcard')
-            gcode_move = self.printer.lookup_object('gcode_move')
-            if os.path.exists(v_sd.print_file_name_path) and v_sd.current_file:
-                gcode_move.recordPrintFileName(v_sd.print_file_name_path, v_sd.current_file.name, pressure_advance="SET_PRESSURE_ADVANCE ADVANCE=%s SMOOTH_TIME=%s" % (pressure_advance, smooth_time))
-        except Exception as err:
-            logging.error(err)
     cmd_SET_E_ROTATION_DISTANCE_help = "Set extruder rotation distance"
     def cmd_SET_E_ROTATION_DISTANCE(self, gcmd):
         rotation_dist = gcmd.get_float('DISTANCE', None)
@@ -230,11 +223,10 @@ class PrinterExtruder:
         return self.heater.stats(eventtime)
     def check_move(self, move):
         axis_r = move.axes_r[3]
-        gcode = self.printer.lookup_object('gcode')
-        # if not self.heater.can_extrude:
-        #     m = """{"code":"key111", "msg": "Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details", "values": []}"""
-        #     gcode._respond_error(m)
-        #     return
+        if not self.heater.can_extrude:
+            raise self.printer.command_error(
+                """{"code":"key111", "msg": "Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details", "values": []}"""
+            )
         if (not move.axes_d[0] and not move.axes_d[1]) or axis_r < 0.:
             # Extrude only move (or retraction move) - limit accel and velocity
             if abs(move.axes_d[3]) > self.max_e_dist:
@@ -252,10 +244,10 @@ class PrinterExtruder:
             area = axis_r * self.filament_area
             logging.debug("Overextrude: %s vs %s (area=%.3f dist=%.3f)",
                           axis_r, self.max_extrude_ratio, area, move.move_d)
-            m = """{"code":"key112", "msg": "Move exceeds maximum extrusion (%.3fmm^2 vs %.3fmm^2)\nSee the 'max_extrude_cross_section' config option for details", "values": [%.3f, %.3f]}""" % (
-                area, self.max_extrude_ratio * self.filament_area, area, self.max_extrude_ratio * self.filament_area)
-            gcode._respond_error(m)
-            return
+            raise self.printer.command_error(
+                """{"code":"key112", "msg": "Move exceeds maximum extrusion (%.3fmm^2 vs %.3fmm^2)\nSee the 'max_extrude_cross_section' config option for details", "values": [%.3f, %.3f]}"""
+                % (
+                area, self.max_extrude_ratio * self.filament_area, area, self.max_extrude_ratio * self.filament_area))
     def calc_junction(self, prev_move, move):
         diff_r = move.axes_r[3] - prev_move.axes_r[3]
         if diff_r:

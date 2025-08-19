@@ -146,6 +146,8 @@ class BedMesh:
         web_request.send({'probed_matrix': probed_matrix})
     def update_mesh(self, web_request):
         probed_matrix = web_request.get("probed_matrix", [[]])
+        if probed_matrix == None:
+            return
         self.z_mesh.update_mesh_probed_matrix(probed_matrix)
         self.set_mesh(self.z_mesh)
         self.update_status()
@@ -241,16 +243,6 @@ class BedMesh:
             while not self.splitter.traverse_complete:
                 split_move = self.splitter.split()
                 if split_move:
-                    reactor = self.printer.get_reactor()
-                    z_homed = 'z' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
-                    x_homed = 'x' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
-                    y_homed = 'y' in self.toolhead.get_status(reactor.monotonic())['homed_axes']
-                    # x or y homed, but z not homed
-                    if (x_homed or y_homed) and not z_homed:
-                        #logging.warning(f'bed_mesh: Z axis is not homed, skipping move z: {split_move}')
-                        list_split_move = list(split_move)
-                        list_split_move[2] = 0
-                        split_move = tuple(list_split_move)
                     self.toolhead.move(split_move, speed)
                 else:
                     raise self.gcode.error(
@@ -650,7 +642,9 @@ class BedMeshCalibrate:
             raise gcmd.error("Value for parameter 'PROFILE' must be specified")
         self.bedmesh.set_mesh(None)
         self.update_config(gcmd)
+        self.printer.lookup_object('gap_auto_comp').in_home = True
         self.probe_helper.start_probe(gcmd)
+        self.printer.lookup_object('gap_auto_comp').in_home = False
     def probe_finalize(self, offsets, positions):
         x_offset, y_offset, z_offset = offsets
         positions = [[round(p[0], 2), round(p[1], 2), p[2]]

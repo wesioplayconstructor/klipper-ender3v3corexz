@@ -33,6 +33,7 @@ class CoreXZKinematics:
         ranges = [r.get_range() for r in self.rails]
         self.axes_min = toolhead.Coord(*[r[0] for r in ranges], e=0.)
         self.axes_max = toolhead.Coord(*[r[1] for r in ranges], e=0.)
+        self.printer = config.get_printer()
     def get_steppers(self):
         return [s for rail in self.rails for s in rail.get_steppers()]
     def calc_position(self, stepper_positions):
@@ -49,6 +50,36 @@ class CoreXZKinematics:
     def note_xy_not_homed(self):
         self.limits[0] = (1.0, -1.0)
         self.limits[1] = (1.0, -1.0)
+
+    def home_z_with_sensorless(self, homing_state, top):
+        # Each axis is homed independently and in order
+        # for axis in homing_state.get_axes():
+        rail = self.rails[2]
+        # Determine movement
+        position_min, position_max = rail.get_range()
+        gcode = self.printer.lookup_object('gcode')
+        position_min = top
+        #gcode.respond_info("[INFO] position_min:{}".format(position_min))
+        #gcode.respond_info("[INFO] position_max:{}".format(position_max))
+        hi = rail.get_homing_info()
+        #gcode.respond_info("[INFO] hi.position_endstop:{}".format(hi.position_endstop))
+        homepos = [None, None, None, None]
+        homepos[2] = hi.position_endstop + position_min
+        forcepos = list(homepos)
+        # forcepos[2] -= position_min
+        forcepos[2] -= 1.5 * (hi.position_endstop - position_min)
+        #gcode.respond_info("[INFO] forcepos:{}".format(forcepos))
+        # forcepos[2] += 1.5 * (position_max - hi.position_endstop)
+        # if hi.positive_dir:
+        #     forcepos[axis] -= 1.5 * (hi.position_endstop - position_min)
+        # else:
+        #     forcepos[axis] += 1.5 * (position_max - hi.position_endstop)
+        # Perform homing
+        rail.homing_retract_dist = 0
+        homing_state.stepper_z_sensorless_flag = True
+        homing_state.home_rails([rail], forcepos, homepos)
+        homing_state.stepper_z_sensorless_flag = False
+    
     def home(self, homing_state):
         # Each axis is homed independently and in order
         for axis in homing_state.get_axes():

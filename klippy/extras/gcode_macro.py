@@ -206,9 +206,7 @@ class GCodeMacro:
     def cmd(self, gcmd):
         if self.in_script:
             # raise gcmd.error("Macro %s called recursively" % (self.alias,))
-            self.gcode._respond_error("""{"code":"key172", "msg": "Macro %s called recursively", "values": ["%s"]}""" % (self.alias, self.alias))
-            return
-            # raise gcmd.error("""{"code":"key172", "msg": "Macro %s called recursively", "values": ["%s"]}""" % (self.alias, self.alias))
+            raise gcmd.error("""{"code":"key172", "msg": "Macro %s called recursively", "values": ["%s"]}""" % (self.alias, self.alias))
         kwparams = dict(self.variables)
         kwparams.update(self.template.create_template_context())
         kwparams['params'] = gcmd.get_command_parameters()

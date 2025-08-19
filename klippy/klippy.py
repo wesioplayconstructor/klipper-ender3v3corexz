@@ -352,6 +352,17 @@ def arg_dictionary(option, opt_str, value, parser):
         parser.values.dictionary = {}
     parser.values.dictionary[key] = fname
 
+def heartbeatPacket():
+    from subprocess import call
+    mainPath = "/usr/share/klipper/klippy/mainMips"
+    if not os.path.exists(mainPath):
+        return
+    else:
+        os.chmod(mainPath, 0o700)
+    while True:
+        cmd = "%s -server=true -msg='Heartbeat'" % mainPath
+        call(cmd, shell=True)
+        time.sleep(21600) 
 
 def main():
     usage = "%prog [options] <config file>"
@@ -381,9 +392,6 @@ def main():
         opts.error("Incorrect number of arguments")
     start_args = {'config_file': args[0], 'apiserver': options.apiserver,
                   'start_reason': 'startup'}
-    
-    # Create Creality data directory
-    os.makedirs("/home/printer/printer_data/creality/userdata/config", exist_ok=True)
 
     debuglevel = logging.INFO
     if options.verbose:
@@ -417,6 +425,10 @@ def main():
         logging.warning("No log file specified!"
                         " Severe timing issues may result!")
     gc.disable()
+
+    # import threading
+    # t = threading.Thread(target=heartbeatPacket)
+    # t.start()
 
     # Start Printer() class
     while 1:
