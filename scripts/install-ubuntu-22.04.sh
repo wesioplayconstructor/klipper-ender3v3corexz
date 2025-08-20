@@ -1,102 +1,110 @@
-#!/bin/bash
-# This script installs Klipper on an Ubuntu 22.04 ("Jammy") machine
+#!/usr/bin/env bash
+set -euo pipefail
 
+# Instalação via APT preferencial para garantir greenlet antes do klippy-requirements.
+REQUIRED_GREENLET="1.1.2"
+WHEEL_URL="${WHEEL_URL:-}"   # opcional fallback
 PYTHONDIR="${HOME}/klippy-env"
-SYSTEMDDIR="/etc/systemd/system"
-KLIPPER_USER=$USER
-KLIPPER_GROUP=$KLIPPER_USER
-
-# Step 1: Install system packages
-install_packages()
-{
-    # Packages for python cffi
-    PKGLIST="virtualenv python3-dev libffi-dev build-essential"
-    # kconfig requirements
-    PKGLIST="${PKGLIST} libncurses-dev"
-    # hub-ctrl
-    PKGLIST="${PKGLIST} libusb-dev"
-    # AVR chip installation and building
-    PKGLIST="${PKGLIST} avrdude gcc-avr binutils-avr avr-libc"
-    # ARM chip installation and building
-    PKGLIST="${PKGLIST} stm32flash dfu-util libnewlib-arm-none-eabi"
-    PKGLIST="${PKGLIST} gcc-arm-none-eabi binutils-arm-none-eabi libusb-1.0"
-
-    # Update system package info
-    report_status "Running apt-get update..."
-    sudo apt-get update
-
-    # Install desired packages
-    report_status "Installing packages..."
-    sudo apt-get install --yes ${PKGLIST}
-}
-
-# Step 2: Create python virtual environment
-create_virtualenv()
-{
-    report_status "Updating python virtual environment..."
-
-    # Create virtualenv if it doesn't already exist
-    [ ! -d ${PYTHONDIR} ] && virtualenv -p python3 ${PYTHONDIR}
-
-    # Install/update dependencies
-    ${PYTHONDIR}/bin/pip install -r ${SRCDIR}/scripts/klippy-requirements.txt
-}
-
-# Step 3: Install startup script
-install_script()
-{
-# Create systemd service file
-    KLIPPER_LOG=/tmp/klippy.log
-    report_status "Installing system start script..."
-    sudo /bin/sh -c "cat > $SYSTEMDDIR/klipper.service" << EOF
-#Systemd service file for klipper
-[Unit]
-Description=Starts klipper on startup
-After=network.target
-
-[Install]
-WantedBy=multi-user.target
-
-[Service]
-Type=simple
-User=$KLIPPER_USER
-RemainAfterExit=yes
-ExecStart=${PYTHONDIR}/bin/python ${SRCDIR}/klippy/klippy.py ${HOME}/printer.cfg -l ${KLIPPER_LOG}
-EOF
-# Use systemctl to enable the klipper systemd service script
-    sudo systemctl enable klipper.service
-}
-
-# Step 4: Start host software
-start_software()
-{
-    report_status "Launching Klipper host software..."
-    sudo systemctl start klipper
-}
-
-# Helper functions
-report_status()
-{
-    echo -e "\n\n###### $1"
-}
-
-verify_ready()
-{
-    if [ "$EUID" -eq 0 ]; then
-        echo "This script must not run as root"
-        exit -1
-    fi
-}
-
-# Force script to exit if an error occurs
-set -e
-
-# Find SRCDIR from the pathname of this script
 SRCDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )"/.. && pwd )"
 
-# Run installation steps defined above
-verify_ready
-install_packages
-create_virtualenv
-install_script
-start_software
+die(){ echo "ERROR: $*" >&2; exit 1; }
+report(){ printf "\n--- %s\n" "$1"; }
+
+# 1) Atualiza apt e tenta instalar pacote python3-greenlet
+report "Tentando instalar python3-greenlet via apt (preferencial)..."
+if command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update -y || true
+
+  # Se quiser forçar uma versão específica (se disponível nos repositórios), descomente:
+  # sudo apt-get install -y python3-greenlet=${REQUIRED_GREENLET} || true
+
+  # Instala versão disponível (se houver)
+  if sudo apt-get install -y python3-greenlet >/dev/null 2>&1; then
+    report "Tentativa apt concluída. Verificando versão instalada..."
+  else
+    report "Pacote python3-greenlet não disponível / falha na instalação via apt."
+  fi
+else
+  report "apt-get não encontrado; não é um sistema Debian/Ubuntu compatível."
+fi
+
+# 2) Verifica versão do greenlet no sistema (site-packages)
+SYS_VER="$(python3 -c 'import importlib,sys
+try:
+  m=importlib.import_module("greenlet")
+  print(m.__version__)
+except Exception:
+  sys.exit(1)
+' 2>/dev/null || true)"
+
+if [ -n "$SYS_VER" ]; then
+  report "greenlet sistema: $SYS_VER"
+else
+  report "greenlet não encontrado no sistema."
+fi
+
+# 3) Se SYS_VER é a versão requerida, cria virtualenv que usa system-site-packages
+if [ "$SYS_VER" = "$REQUIRED_GREENLET" ]; then
+  report "Versão apt OK ($SYS_VER). Criando/updating virtualenv com acesso a site-packages do sistema..."
+  if [ ! -d "$PYTHONDIR" ]; then
+    python3 -m pip install --user virtualenv >/dev/null 2>&1 || true
+    python3 -m virtualenv --system-site-packages -p python3 "$PYTHONDIR"
+  else
+    # já existe venv: garantir pip atualizado
+    "$PYTHONDIR/bin/python" -m pip install --upgrade pip setuptools wheel || true
+  fi
+
+  report "Instalando requirements do klippy (usar system greenlet)..."
+  if [ -f "${SRCDIR}/scripts/klippy-requirements.txt" ]; then
+    "$PYTHONDIR/bin/pip" install -r "${SRCDIR}/scripts/klippy-requirements.txt"
+  else
+    report "klippy-requirements.txt não encontrado; pulando."
+  fi
+
+  report "Concluído (usando greenlet do apt)."
+  exit 0
+fi
+
+# 4) Se chegamos aqui, apt não instalou a versão desejada -> fallback
+report "apt não forneceu greenlet==${REQUIRED_GREENLET}. Tentando fallback (wheel ou compilar)."
+
+# tentar wheel se WHEEL_URL fornecida
+if [ -n "$WHEEL_URL" ]; then
+  TMPW="/tmp/greenlet-$$.whl"
+  if command -v curl >/dev/null 2>&1; then
+    curl -L -f -o "$TMPW" "$WHEEL_URL" || rm -f "$TMPW"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$TMPW" "$WHEEL_URL" || rm -f "$TMPW"
+  fi
+  if [ -f "$TMPW" ]; then
+    python3 -m pip install --user virtualenv >/dev/null 2>&1 || true
+    python3 -m virtualenv -p python3 "$PYTHONDIR"
+    "$PYTHONDIR/bin/pip" install --no-deps "$TMPW" || die "Falha ao instalar wheel"
+    rm -f "$TMPW"
+    report "greenlet instalado via wheel no venv."
+    "$PYTHONDIR/bin/pip" install -r "${SRCDIR}/scripts/klippy-requirements.txt" || true
+    exit 0
+  else
+    report "Wheel não disponível ou falha no download."
+  fi
+fi
+
+# 5) Último recurso: compilar/instalar no venv (requer build-essentials)
+report "Fallback: compilando/instalando greenlet==${REQUIRED_GREENLET} no virtualenv."
+if command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update -y || true
+  sudo apt-get install -y build-essential python3-dev gcc || true
+fi
+
+python3 -m pip install --user virtualenv >/dev/null 2>&1 || true
+python3 -m virtualenv -p python3 "$PYTHONDIR"
+"$PYTHONDIR/bin/pip" install --upgrade pip setuptools wheel || true
+"$PYTHONDIR/bin/pip" install --no-binary :all: "greenlet==${REQUIRED_GREENLET}" || die "Falha ao compilar/instalar greenlet"
+
+report "greenlet instalado no venv (compilado). Agora instalando klippy requirements..."
+if [ -f "${SRCDIR}/scripts/klippy-requirements.txt" ]; then
+  "$PYTHONDIR/bin/pip" install -r "${SRCDIR}/scripts/klippy-requirements.txt"
+fi
+
+report "Finalizado."
+exit 0
